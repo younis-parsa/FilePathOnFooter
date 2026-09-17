@@ -1,0 +1,134 @@
+name: Release
+
+# Publishes a GitHub Release whose asset is the built .vsix installer.
+#
+# Usage:
+#   1. Bump <FilePathOnFooterVersion> in version.props, commit it.
+#   2. git tag v1.0.1 && git push origin v1.0.1
+#
+# The job refuses to publish if the tag does not match version.props, so the tag,
+# the VSIX manifest and the assembly version cannot drift apart.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.actor == github.repository_owner
+    runs-on: windows-latest
+
+    permissions:
+      contents: write # required to create the release and upload the asset
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Resolve version and check it matches the tag
+        id: version
+        shell: pwsh
+        run: |
+          [xml]$props = Get-Content version.props
+          $version = ($props.Project.PropertyGroup.FilePathOnFooterVersion | Where-Object { $_ }).Trim()
+          if (-not $version) { throw 'Could not read FilePathOnFooterVersion from version.props.' }
+
+          $tag = '${{ github.ref_name }}'
+          $expected = "v$version"
+          if ($tag -ne $expected) {
+            throw "Tag '$tag' does not match version.props ($version). Expected '$expected'. Bump version.props, or retag."
+          }
+
+          Write-Host "Version $version matches tag $tag."
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag"         >> $env:GITHUB_OUTPUT
+          # A tag such as v1.1.0-beta.1 is published as a prerelease.
+          "prerelease=$(if ($tag -match '-') { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Restore NuGet packages
+        run: msbuild src\FilePathOnFooter\FilePathOnFooter.csproj -t:Restore -v:minimal -nologo
+
+      - name: Build (Release)
+        run: msbuild src\FilePathOnFooter\FilePathOnFooter.csproj -t:Rebuild -p:Configuration=Release -v:minimal -nologo
+
+      - name: Verify the built VSIX
+        id: vsix
+        shell: pwsh
+        run: |
+          $vsix = Get-ChildItem src\FilePathOnFooter\bin\Release -Filter *.vsix | Select-Object -First 1
+          if (-not $vsix) { throw 'No .vsix produced.' }
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($vsix.FullName)
+          try {
+            $names = $zip.Entries | ForEach-Object { $_.FullName }
+            Write-Host "VSIX entries: $($names -join ', ')"
+            foreach ($required in 'extension.vsixmanifest', 'FilePathOnFooter.dll', 'FilePathOnFooter.pkgdef', 'LICENSE.txt') {
+              if ($names -notcontains $required) { throw "VSIX is missing '$required'." }
+            }
+
+            $entry  = $zip.Entries | Where-Object { $_.FullName -eq 'extension.vsixmanifest' }
+            $reader = New-Object System.IO.StreamReader($entry.Open())
+            $manifest = [xml]$reader.ReadToEnd()
+            $reader.Close()
+          }
+          finally { $zip.Dispose() }
+
+          $packaged = $manifest.PackageManifest.Metadata.Identity.Version
+          $expected = '${{ steps.version.outputs.version }}'
+          if ($packaged -ne $expected) {
+            throw "VSIX manifest version is '$packaged' but version.props says '$expected'."
+          }
+
+          Write-Host "Packaged VSIX version $packaged verified."
+          "path=$($vsix.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Write release notes
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          @"
+          ## Install
+
+          1. **Close every Visual Studio window** - VSIXInstaller cannot write to an install that is in use.
+          2. Download ``FilePathOnFooter.vsix`` below and double-click it.
+          3. Start Visual Studio and open any text document. The path appears along the bottom edge of the editor, under the horizontal scroll bar.
+
+          To uninstall: **Extensions -> Manage Extensions -> Installed -> File Path On Footer -> Uninstall**.
+
+          ## Requirements
+
+          - Visual Studio **2022 (17.x)** or **2026 (18.x)** - Community, Professional or Enterprise, x64
+          - The ``Microsoft.VisualStudio.Component.CoreEditor`` component (present in every VS install)
+
+          ## About this build
+
+          Built by the Release workflow from commit ``$env:GITHUB_SHA`` and verified to contain the
+          manifest, the MEF assembly, the pkgdef and the licence, with the packaged manifest version
+          matching ``version.props`` ($version).
+
+          Licensed under **GNU GPL v3.0**. The licence text ships inside the ``.vsix``.
+          "@ | Set-Content release-notes.md -Encoding utf8
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${{ steps.version.outputs.tag }}"
+          "${{ steps.vsix.outputs.path }}"
+          --repo "${{ github.repository }}"
+          --title "${{ steps.version.outputs.tag }} - File Path On Footer"
+          --notes-file release-notes.md
+          --prerelease=${{ steps.version.outputs.prerelease }}

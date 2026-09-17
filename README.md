@@ -183,12 +183,55 @@ The installed VS falls outside the manifest's version range — see *About the v
 |---|---|---|
 | `.github/workflows/build.yml` | push to `main`, manual | Builds the VSIX on `windows-latest`, verifies the archive contains the manifest, DLL, pkgdef and licence, and uploads the `.vsix` as a build artifact. |
 | `.github/workflows/codeql.yml` | push to `main`, weekly, manual | CodeQL static security analysis of the C# source (`security-and-quality` query suite). Results appear under **Security → Code scanning**. |
+| `.github/workflows/release.yml` | push of a `v*.*.*` tag | Checks the tag matches `version.props`, builds, verifies the `.vsix`, and publishes a GitHub Release with the installer attached. |
 | `.github/dependabot.yml` | weekly | Watches the NuGet packages and the GitHub Actions versions for updates and known CVEs. Major bumps of the VS SDK packages are ignored on purpose — see the comments in the file. |
 
 Both workflows are **owner-only**: `workflow_dispatch` and pushes to `main` already require write
 access, and each job additionally guards with `if: github.actor == github.repository_owner`, so
 nothing executes under a fork's or an outside contributor's identity. Workflow permissions are
 scoped down to `contents: read`, with `security-events: write` granted only to the CodeQL job.
+
+---
+
+## Versioning and releasing
+
+The version lives in **one place**: `<FilePathOnFooterVersion>` in [`version.props`](version.props).
+At build time it is stamped into both outputs, so they cannot drift:
+
+| Output | How it gets the version |
+|---|---|
+| `extension.vsixmanifest` (and the generated `manifest.json` / `catalog.json`) | The `StampVsixManifestVersion` target patches `Identity/@Version` in the intermediate manifest under `obj\`, after the VSSDK detokenises it. The checked-in `source.extension.vsixmanifest` is never modified. |
+| `AssemblyVersion`, `AssemblyFileVersion`, `AssemblyInformationalVersion` | The `GenerateVersionAttributes` target writes `obj\VersionInfo.g.cs` via `WriteCodeFragment`. `AssemblyInfo.cs` deliberately declares no version attributes. |
+
+The version number in the checked-in `source.extension.vsixmanifest` is therefore a placeholder —
+the build overwrites it. Read `version.props` to know the real version.
+
+### Cutting a release
+
+```powershell
+# 1. Bump the single source of truth, and commit it
+#    version.props:  <FilePathOnFooterVersion>1.0.1</FilePathOnFooterVersion>
+git commit -am "Bump version to 1.0.1"
+git push
+
+# 2. Tag and push the tag
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+The Release workflow then:
+
+1. **Refuses to continue if the tag does not match `version.props`** — pushing `v1.0.2` while
+   `version.props` says `1.0.1` fails the job rather than publishing a mislabelled release.
+2. Builds in Release configuration.
+3. Verifies the `.vsix` contains the manifest, the MEF assembly, the pkgdef and the licence, **and**
+   that the packaged manifest version matches `version.props`.
+4. Publishes the release with `FilePathOnFooter.vsix` attached.
+
+A tag with a hyphen (`v1.1.0-beta.1`) is published as a prerelease.
+
+If a release fails partway, fix the cause and re-run the failed workflow run — or delete the tag
+(`git push --delete origin v1.0.1`) and start again.
 
 ---
 

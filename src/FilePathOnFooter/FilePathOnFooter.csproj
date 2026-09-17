@@ -2,6 +2,9 @@
 <Project ToolsVersion="Current" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
 
+  <!-- Single source of truth for the version; see version.props for how it is used. -->
+  <Import Project="$(MSBuildThisFileDirectory)..\..\version.props" />
+
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
@@ -97,4 +100,61 @@
 
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets" Condition="'$(VSToolsPath)' != '' And Exists('$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets')" />
+
+  <!--
+    Versioning. $(FilePathOnFooterVersion) comes from version.props and is stamped into both
+    outputs, so the manifest and the assembly can never disagree.
+  -->
+  <PropertyGroup>
+    <_VersionPropsFile>$(MSBuildThisFileDirectory)..\..\version.props</_VersionPropsFile>
+    <_GeneratedVersionFile>$(IntermediateOutputPath)VersionInfo.g.cs</_GeneratedVersionFile>
+  </PropertyGroup>
+
+  <!-- Assembly attributes, generated into obj\ rather than hand-maintained in AssemblyInfo.cs. -->
+  <Target Name="GenerateVersionAttributes"
+          BeforeTargets="BeforeCompile"
+          Condition="'$(FilePathOnFooterVersion)' != ''"
+          Inputs="$(_VersionPropsFile)"
+          Outputs="$(_GeneratedVersionFile)">
+    <ItemGroup>
+      <_VersionAttribute Include="System.Reflection.AssemblyVersion">
+        <_Parameter1>$(FilePathOnFooterVersion).0</_Parameter1>
+      </_VersionAttribute>
+      <_VersionAttribute Include="System.Reflection.AssemblyFileVersion">
+        <_Parameter1>$(FilePathOnFooterVersion).0</_Parameter1>
+      </_VersionAttribute>
+      <_VersionAttribute Include="System.Reflection.AssemblyInformationalVersion">
+        <_Parameter1>$(FilePathOnFooterVersion)</_Parameter1>
+      </_VersionAttribute>
+    </ItemGroup>
+    <MakeDir Directories="$(IntermediateOutputPath)" />
+    <WriteCodeFragment Language="C#"
+                       OutputFile="$(_GeneratedVersionFile)"
+                       AssemblyAttributes="@(_VersionAttribute)" />
+  </Target>
+
+  <!-- Always add the generated file to the compilation, whether or not it was just rewritten. -->
+  <Target Name="IncludeGeneratedVersionAttributes"
+          AfterTargets="GenerateVersionAttributes"
+          BeforeTargets="BeforeCompile"
+          Condition="'$(FilePathOnFooterVersion)' != ''">
+    <ItemGroup>
+      <Compile Include="$(_GeneratedVersionFile)" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    Stamp the VSIX manifest. DetokenizeVsixManifestFile writes the manifest the packaging step
+    consumes into obj\; patching it there leaves source.extension.vsixmanifest untouched and lets
+    the generated manifest.json / catalog.json pick the version up too.
+  -->
+  <Target Name="StampVsixManifestVersion"
+          AfterTargets="DetokenizeVsixManifestFile"
+          Condition="'$(FilePathOnFooterVersion)' != '' And Exists('$(IntermediateVsixManifest)')">
+    <XmlPoke XmlInputPath="$(IntermediateVsixManifest)"
+             Query="/vsx:PackageManifest/vsx:Metadata/vsx:Identity/@Version"
+             Value="$(FilePathOnFooterVersion)"
+             Namespaces="&lt;Namespace Prefix='vsx' Uri='http://schemas.microsoft.com/developer/vsx-schema/2011' /&gt;" />
+    <Message Importance="high" Text="VSIX version stamped: $(FilePathOnFooterVersion)" />
+  </Target>
 </Project>

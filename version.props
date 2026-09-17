@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The single source of truth for this extension's version.
+
+  Bump the value here and nothing else. At build time it is stamped into:
+    - the VSIX manifest    (Identity/@Version, and the generated manifest.json / catalog.json)
+    - the assembly         (AssemblyVersion, AssemblyFileVersion, AssemblyInformationalVersion)
+
+  The release workflow reads the same value and refuses to publish if the pushed tag
+  (vX.Y.Z) does not match it, so the tag, the manifest and the assembly cannot drift.
+
+  Format: three-part MAJOR.MINOR.PATCH. The assembly attributes append ".0".
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <FilePathOnFooterVersion>1.0.0</FilePathOnFooterVersion>
+  </PropertyGroup>
+</Project>

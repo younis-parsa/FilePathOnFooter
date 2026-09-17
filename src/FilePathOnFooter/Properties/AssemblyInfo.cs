@@ -28,5 +28,5 @@ using System.Runtime.InteropServices;
 
 [assembly: ComVisible(false)]
 
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+// AssemblyVersion, AssemblyFileVersion and AssemblyInformationalVersion are generated at build
+// time from $(FilePathOnFooterVersion) in version.props - do not add them here.
