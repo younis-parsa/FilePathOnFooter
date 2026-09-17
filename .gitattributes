@@ -1,0 +1,11 @@
+# Normalise text files in the repository to LF; check out per the rules below.
+* text=auto eol=lf
+
+# Windows tooling is happier with CRLF for these.
+*.sln       text eol=crlf
+*.csproj    text eol=crlf
+*.ps1       text eol=crlf
+
+*.cs        text diff=csharp
+
+*.vsix      binary

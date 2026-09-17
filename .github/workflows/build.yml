@@ -1,0 +1,63 @@
+name: Build VSIX
+
+# Runs on pushes to main and on manual dispatch.
+#
+# Only the repository owner can run this:
+#   - workflow_dispatch is restricted by GitHub to accounts with write access
+#   - push to main likewise requires write access
+#   - the job-level `if` below is a belt-and-braces check on the acting user, so
+#     nothing runs under a fork's or a contributor's identity
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+# Least privilege: the build only reads the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.actor == github.repository_owner
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Restore NuGet packages
+        run: msbuild src\FilePathOnFooter\FilePathOnFooter.csproj -t:Restore -v:minimal -nologo
+
+      - name: Build (Release)
+        run: msbuild src\FilePathOnFooter\FilePathOnFooter.csproj -t:Rebuild -p:Configuration=Release -v:minimal -nologo
+
+      - name: Verify VSIX contents
+        shell: pwsh
+        run: |
+          $vsix = Get-ChildItem src\FilePathOnFooter\bin\Release -Filter *.vsix | Select-Object -First 1
+          if (-not $vsix) { throw 'No .vsix produced.' }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($vsix.FullName)
+          $names = $zip.Entries | ForEach-Object { $_.FullName }
+          $zip.Dispose()
+          Write-Host "VSIX entries: $($names -join ', ')"
+          foreach ($required in 'extension.vsixmanifest', 'FilePathOnFooter.dll', 'FilePathOnFooter.pkgdef', 'LICENSE.txt') {
+            if ($names -notcontains $required) { throw "VSIX is missing '$required'." }
+          }
+          Write-Host 'VSIX contents verified.'
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: FilePathOnFooter-vsix
+          path: src/FilePathOnFooter/bin/Release/*.vsix
+          if-no-files-found: error

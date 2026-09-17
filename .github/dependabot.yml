@@ -1,0 +1,29 @@
+version: 2
+
+updates:
+  # NuGet packages: Microsoft.VisualStudio.SDK and Microsoft.VSSDK.BuildTools.
+  - package-ecosystem: "nuget"
+    directory: "/src/FilePathOnFooter"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    ignore:
+      # Staying on the 17.x SDK is deliberate: compiling against the oldest
+      # supported VS generation is what lets one binary load on both 17.x and
+      # 18.x. A major bump would drop Visual Studio 2022 support.
+      - dependency-name: "Microsoft.VisualStudio.SDK"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.VSSDK.BuildTools"
+        update-types: ["version-update:semver-major"]
+
+  # Keep the actions used by the workflows current (security patches included).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "ci"

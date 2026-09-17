@@ -1,0 +1,59 @@
+name: CodeQL
+
+# Static security analysis of the C# source. Free on public repositories;
+# results land in the repository's Security -> Code scanning tab.
+#
+# Same owner-only restriction as the build workflow.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  schedule:
+    # Mondays at 04:27 UTC — catches newly published queries against unchanged code.
+    - cron: '27 4 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    if: github.actor == github.repository_owner
+    runs-on: windows-latest
+
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: csharp
+          # The project is .NET Framework 4.7.2 and needs MSBuild, so drive the
+          # build explicitly rather than relying on autobuild.
+          build-mode: manual
+          queries: security-and-quality
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Restore NuGet packages
+        run: msbuild src\FilePathOnFooter\FilePathOnFooter.csproj -t:Restore -v:minimal -nologo
+
+      - name: Build (Release)
+        run: msbuild src\FilePathOnFooter\FilePathOnFooter.csproj -t:Rebuild -p:Configuration=Release -v:minimal -nologo
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:csharp"
